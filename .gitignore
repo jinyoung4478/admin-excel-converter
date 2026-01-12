@@ -12,3 +12,8 @@ backup/
 
 # Test files
 *.xlsx
+
+# Rust/WASM
+wasm/target/
+wasm/Cargo.lock
+src/wasm/
