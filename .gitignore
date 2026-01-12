@@ -1,0 +1,14 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Backup
+backup/
+
+# Test files
+*.xlsx
