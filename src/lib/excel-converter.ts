@@ -86,7 +86,7 @@ interface WasmConversionResult {
 
 interface WasmModule {
   convert_excel: (originData: Uint8Array, mappingData: Uint8Array, filename: string) => WasmConversionResult;
-  default: (path?: string) => Promise<void>;
+  default: (path?: string) => Promise<unknown>;
 }
 
 // ========== WASM Module Manager ==========
@@ -106,7 +106,7 @@ class WasmModuleManager {
   private async _doInitialize(): Promise<boolean> {
     try {
       // Dynamic import of WASM module
-      const wasm = await import('@/wasm/excel_converter_wasm.js') as WasmModule;
+      const wasm = await import('@/wasm/excel_converter_wasm.js') as unknown as WasmModule;
       
       // Initialize with public path for wasm file
       const wasmPath = import.meta.env.BASE_URL + 'excel_converter_wasm_bg.wasm';
