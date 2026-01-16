@@ -1,70 +1,73 @@
-# 간식서비스 엑셀 변환
+# React + TypeScript + Vite
 
-현대차 간식서비스 원본 엑셀 파일을 시스템 입력용 형식으로 변환하는 웹 앱입니다.
+This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
-## 사용 방법
+Currently, two official plugins are available:
 
-1. 웹사이트 접속
-2. 원본 엑셀 파일 선택
-3. 매핑 테이블 파일 선택
-4. [변환하기] 클릭
-5. 결과 파일 자동 다운로드
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
+- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
 
-## 결과 파일 구성
+## React Compiler
 
-| 시트 | 내용 |
-|------|------|
-| 데이터 | 일자, 코드, 원본 사업장명, 사업장명, 품목명, Box 입수, 오후 진열 |
-| 검증 | 일자별 Box 합계 검증 (추출값 vs 원본 F8셀 비교) |
-| 매장별 상세 | 매장/일자별 Box 합계 |
-| 매핑실패 매장 리스트 | 매핑되지 않은 매장 목록 (해당 시) |
+The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
 
-## 매핑 테이블
+## Expanding the ESLint configuration
 
-엑셀 파일로 관리하며 아래 컬럼이 필요합니다:
+If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
 
-| 컬럼 | 설명 |
-|------|------|
-| 코드 | 시스템 사업장 코드 |
-| 원본 사업장명 | 원본 엑셀의 매장명 |
-| 사업장명 | 시스템 등록 사업장명 |
+```js
+export default defineConfig([
+  globalIgnores(['dist']),
+  {
+    files: ['**/*.{ts,tsx}'],
+    extends: [
+      // Other configs...
 
-## 주요 기능
+      // Remove tseslint.configs.recommended and replace with this
+      tseslint.configs.recommendedTypeChecked,
+      // Alternatively, use this for stricter rules
+      tseslint.configs.strictTypeChecked,
+      // Optionally, add this for stylistic rules
+      tseslint.configs.stylisticTypeChecked,
 
-- **WASM 가속**: Rust 기반 고속 파싱 (JS fallback 지원)
-- **3열 테이블 지원**: B, K, T열의 매장 테이블 자동 인식
-- **매핑 실패 탐지**: 매핑 실패 행은 연한 빨간색 배경으로 표시
-- **데이터 검증**: 요일별 시트의 F8 셀 값과 추출 합계 비교
-
-## 기술 스택
-
-| 구분 | 기술 |
-|------|------|
-| Frontend | HTML5, CSS3, JavaScript (ES6 Modules) |
-| Excel 파싱 | WASM (Rust + calamine) / JS Fallback (ExcelJS) |
-| Excel 생성 | ExcelJS |
-| 파일 다운로드 | FileSaver.js |
-
-## 프로젝트 구조
-
-```
-src/
-├── index.html                 # 메인 HTML
-├── js/
-│   ├── app.js                 # 앱 초기화, 탭 관리
-│   ├── core.js                # 공통 유틸리티
-│   └── converters/
-│       └── hyundai.js         # 현대차 컨버터 모듈
-└── wasm/
-    └── excel_converter_wasm.js
-
-wasm/
-├── Cargo.toml                 # Rust 프로젝트 설정
-└── src/
-    └── lib.rs                 # WASM 모듈
+      // Other configs...
+    ],
+    languageOptions: {
+      parserOptions: {
+        project: ['./tsconfig.node.json', './tsconfig.app.json'],
+        tsconfigRootDir: import.meta.dirname,
+      },
+      // other options...
+    },
+  },
+])
 ```
 
-## 배포
+You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
 
-GitHub Pages로 자동 배포됩니다.
-- `main` 브랜치에 푸시하면 자동 배포
+```js
+// eslint.config.js
+import reactX from 'eslint-plugin-react-x'
+import reactDom from 'eslint-plugin-react-dom'
+
+export default defineConfig([
+  globalIgnores(['dist']),
+  {
+    files: ['**/*.{ts,tsx}'],
+    extends: [
+      // Other configs...
+      // Enable lint rules for React
+      reactX.configs['recommended-typescript'],
+      // Enable lint rules for React DOM
+      reactDom.configs.recommended,
+    ],
+    languageOptions: {
+      parserOptions: {
+        project: ['./tsconfig.node.json', './tsconfig.app.json'],
+        tsconfigRootDir: import.meta.dirname,
+      },
+      // other options...
+    },
+  },
+])
+```
