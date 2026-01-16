@@ -230,6 +230,7 @@ function convertDataJS(originWorkbook, mapping, fileName) {
                 allData.push({
                     '일자': ExcelCore.formatDate(date),
                     '코드': code,
+                    '원본 사업장명': storeName,
                     '사업장명': systemName,
                     '품목명': product.productName,
                     'Box 입수': product.boxQty,
@@ -325,6 +326,7 @@ async function convert() {
             data: result.data.map(r => ({
                 '일자': r.date,
                 '코드': r.code,
+                '원본 사업장명': r.original_store_name,
                 '사업장명': r.store_name,
                 '품목명': r.product_name,
                 'Box 입수': r.box_qty,

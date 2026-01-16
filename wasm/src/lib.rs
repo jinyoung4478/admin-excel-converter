@@ -33,6 +33,7 @@ struct MappingEntry {
 pub struct DataRow {
     pub date: String,
     pub code: String,
+    pub original_store_name: String,
     pub store_name: String,
     pub product_name: String,
     pub box_qty: i32,
@@ -445,6 +446,7 @@ fn convert_internal(
                 all_data.push(DataRow {
                     date: date_str.clone(),
                     code: code.clone(),
+                    original_store_name: block.store_name.clone(),
                     store_name: system_name.clone(),
                     product_name,
                     box_qty,
