@@ -3,7 +3,7 @@
  * WASM 가속 지원 (fallback: JS)
  */
 
-import { ExcelCore, StatusManager, FileInputManager } from '../core.js';
+import { ExcelCore, StatusManager, FileInputManager } from '../core.js?v=5';
 
 // 컨버터 설정
 const config = {
@@ -87,7 +87,7 @@ function extractDateFromFileName(fileName) {
 // 매핑 테이블 파싱
 function parseMappingTable(workbook) {
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const data = XLSX.utils.sheet_to_json(sheet);
+    const data = ExcelCore.sheetToJson(sheet);
 
     const mapping = {};
     data.forEach(row => {
@@ -106,7 +106,7 @@ function parseMappingTable(workbook) {
 // 매장 블록 찾기
 function findStoreBlocks(sheet) {
     const blocks = [];
-    const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
+    const range = ExcelCore.decodeRange(sheet['!ref'] || 'A1');
 
     for (let row = 1; row <= range.e.r + 1; row++) {
         const bVal = ExcelCore.getCellValue(sheet, row, 2);
@@ -214,14 +214,22 @@ function convertDataJS(originWorkbook, mapping, fileName) {
         for (const block of storeBlocks) {
             const storeName = block.storeName;
 
-            let code, systemName;
+            let code, systemName, isMappingFailed;
             if (!mapping[storeName]) {
                 mappingFailures.push({ day: dayName, storeName });
                 code = 'MAPPING_FAILED';
                 systemName = '[매핑실패] ' + storeName;
+                isMappingFailed = true;
+            } else if (!mapping[storeName].code || !mapping[storeName].systemName) {
+                // 매핑 테이블에 있지만 코드나 사업장명이 비어있는 경우
+                mappingFailures.push({ day: dayName, storeName });
+                code = 'MAPPING_FAILED';
+                systemName = '[매핑실패-빈값] ' + storeName;
+                isMappingFailed = true;
             } else {
                 code = mapping[storeName].code;
                 systemName = mapping[storeName].systemName;
+                isMappingFailed = false;
             }
 
             const products = extractProductsFromBlock(sheet, block);
@@ -234,7 +242,8 @@ function convertDataJS(originWorkbook, mapping, fileName) {
                     '사업장명': systemName,
                     '품목명': product.productName,
                     'Box 입수': product.boxQty,
-                    '오후 진열': product.afternoon
+                    '오후 진열': product.afternoon,
+                    '_isMappingFailed': isMappingFailed  // 내부 플래그 (출력에서 제외됨)
                 });
             }
         }
@@ -261,12 +270,25 @@ function convertDataJS(originWorkbook, mapping, fileName) {
             matchResult = '원본 데이터 없음';
         }
 
+        // 해당 요일의 매핑 실패 정보
+        const dayMappingFailures = mappingFailures
+            .filter(f => f.day === dayName)
+            .map(f => f.storeName);
+        const uniqueDayFailures = [...new Set(dayMappingFailures)];
+        
+        // 매핑실패 데이터 수 (해당 요일의 매핑실패 행 수)
+        const mappingFailureRows = allData
+            .filter(row => row['일자'] === dateStr && row['매핑실패'] === 'Y')
+            .length;
+
         validationData.push({
             '일자': dateStr,
             '요일': dayName,
             '추출 Box 합계': extractedBox,
             '원본 Box 합계': originalBox,
-            '검증 결과': matchResult
+            '검증 결과': matchResult,
+            '매핑실패 매장수': uniqueDayFailures.length,
+            '매핑실패 데이터수': mappingFailureRows
         });
     }
 
@@ -298,11 +320,25 @@ function createResultWorkbookJS(result) {
     const workbook = ExcelCore.createWorkbook();
 
     ExcelCore.addSheet(workbook, result.data, '데이터');
-    ExcelCore.addSheet(workbook, result.validation, '검증');
+    
+    // 검증 시트: 매핑실패가 없으면 관련 열 제거
+    const hasMappingFailures = result.validation.some(
+        row => row['매핑실패 매장수'] > 0 || row['매핑실패 데이터수'] > 0
+    );
+    
+    let validationData = result.validation;
+    if (!hasMappingFailures) {
+        validationData = result.validation.map(row => {
+            const { '매핑실패 매장수': _, '매핑실패 데이터수': __, ...rest } = row;
+            return rest;
+        });
+    }
+    
+    ExcelCore.addSheet(workbook, validationData, '검증');
     ExcelCore.addSheet(workbook, result.storeDaily, '매장별 상세');
 
     if (result.mappingFailures.length > 0) {
-        ExcelCore.addSheet(workbook, result.mappingFailures, '매핑실패');
+        ExcelCore.addSheet(workbook, result.mappingFailures, '매핑실패 매장 리스트');
     }
 
     return workbook;
@@ -330,14 +366,17 @@ async function convert() {
                 '사업장명': r.store_name,
                 '품목명': r.product_name,
                 'Box 입수': r.box_qty,
-                '오후 진열': r.afternoon || ''
+                '오후 진열': r.afternoon || '',
+                '_isMappingFailed': r.mapping_failed === 'Y'  // 내부 플래그 (출력에서 제외됨)
             })),
             validation: result.validation.map(r => ({
                 '일자': r.date,
                 '요일': r.day_name,
                 '추출 Box 합계': r.extracted_box,
                 '원본 Box 합계': r.original_box,
-                '검증 결과': r.result
+                '검증 결과': r.result,
+                '매핑실패 매장수': r.mapping_failure_stores,
+                '매핑실패 데이터수': r.mapping_failure_rows
             })),
             storeDaily: result.store_daily.map(r => ({
                 '일자': r.date,
@@ -350,7 +389,7 @@ async function convert() {
 
         const workbook = createResultWorkbookJS(jsResult);
         const outputFileName = originFile.name.replace(/\.xlsx?$/i, '_result.xlsx');
-        ExcelCore.downloadExcel(workbook, outputFileName);
+        await ExcelCore.downloadExcel(workbook, outputFileName);
 
         const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
         return { count: result.data.length, elapsed, mode: 'WASM' };
@@ -366,7 +405,7 @@ async function convert() {
         const workbook = createResultWorkbookJS(result);
 
         const outputFileName = originFile.name.replace(/\.xlsx?$/i, '_result.xlsx');
-        ExcelCore.downloadExcel(workbook, outputFileName);
+        await ExcelCore.downloadExcel(workbook, outputFileName);
 
         const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
         return { count: result.data.length, elapsed, mode: 'JS' };

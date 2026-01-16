@@ -3,7 +3,7 @@
  */
 
 // 컨버터 임포트
-import hyundaiConverter from './converters/hyundai.js';
+import hyundaiConverter from './converters/hyundai.js?v=7';
 
 // 등록된 컨버터 목록
 const converters = [

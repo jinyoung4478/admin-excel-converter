@@ -38,6 +38,7 @@ pub struct DataRow {
     pub product_name: String,
     pub box_qty: i32,
     pub afternoon: String,
+    pub mapping_failed: String,  // 매핑실패 여부 ("Y" 또는 "")
 }
 
 // 검증 데이터 행
@@ -48,6 +49,8 @@ pub struct ValidationRow {
     pub extracted_box: i32,
     pub original_box: i32,
     pub result: String,
+    pub mapping_failure_stores: i32,  // 매핑실패 매장 수 (중복 제거)
+    pub mapping_failure_rows: i32,     // 매핑실패 데이터 수
 }
 
 // 매장별 상세 행
@@ -430,14 +433,27 @@ fn convert_internal(
 
         let blocks = find_store_blocks(&range);
 
+        // 해당 요일의 매핑 실패 목록
+        let mut day_mapping_failures: Vec<String> = Vec::new();
+
         for block in &blocks {
-            let (code, system_name) = if let Some(entry) = mapping.get(&block.store_name) {
-                (entry.code.clone(), entry.system_name.clone())
+            let (code, system_name, is_mapping_failed) = if let Some(entry) = mapping.get(&block.store_name) {
+                // 매핑 테이블에 있지만 코드나 사업장명이 비어있으면 매핑 실패
+                if entry.code.is_empty() || entry.system_name.is_empty() {
+                    if !mapping_failures.contains(&block.store_name) {
+                        mapping_failures.push(block.store_name.clone());
+                    }
+                    day_mapping_failures.push(block.store_name.clone());
+                    ("MAPPING_FAILED".to_string(), format!("[매핑실패-빈값] {}", block.store_name), true)
+                } else {
+                    (entry.code.clone(), entry.system_name.clone(), false)
+                }
             } else {
                 if !mapping_failures.contains(&block.store_name) {
                     mapping_failures.push(block.store_name.clone());
                 }
-                ("MAPPING_FAILED".to_string(), format!("[매핑실패] {}", block.store_name))
+                day_mapping_failures.push(block.store_name.clone());
+                ("MAPPING_FAILED".to_string(), format!("[매핑실패] {}", block.store_name), true)
             };
 
             let products = extract_products_from_block(&range, block, 25);
@@ -451,6 +467,7 @@ fn convert_internal(
                     product_name,
                     box_qty,
                     afternoon,
+                    mapping_failed: if is_mapping_failed { "Y".to_string() } else { String::new() },
                 });
             }
         }
@@ -472,12 +489,24 @@ fn convert_internal(
             "원본 데이터 없음".to_string()
         };
 
+        // 매핑 실패 정보
+        // 매핑실패 매장 수 (중복 제거)
+        let unique_failures: std::collections::HashSet<_> = day_mapping_failures.iter().collect();
+        let mapping_failure_stores = unique_failures.len() as i32;
+        
+        // 매핑실패 데이터 수 (해당 요일의 매핑실패 행 수)
+        let mapping_failure_rows = all_data.iter()
+            .filter(|r| r.date == date_str && r.mapping_failed == "Y")
+            .count() as i32;
+
         validation.push(ValidationRow {
             date: date_str,
             day_name: day_name.to_string(),
             extracted_box,
             original_box,
             result,
+            mapping_failure_stores,
+            mapping_failure_rows,
         });
     }
 
