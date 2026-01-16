@@ -134,6 +134,19 @@ function findStoreBlocks(sheet) {
                 colBox: 15
             });
         }
+
+        const tVal = ExcelCore.getCellValue(sheet, row, 20);
+        const tStore = extractStoreName(tVal);
+        if (tStore) {
+            blocks.push({
+                storeName: tStore,
+                row: row,
+                colNo: 20,
+                colAfternoon: 21,
+                colProduct: 23,
+                colBox: 24
+            });
+        }
     }
 
     return blocks;
@@ -198,6 +211,14 @@ function getDaySheetTotals(workbook, dayDates) {
 
             if (kVal === '계') {
                 const boxVal = ExcelCore.getCellValue(sheet, row, 15);
+                if (boxVal && parseInt(boxVal) > 0) {
+                    storeBoxSum += parseInt(boxVal);
+                }
+            }
+
+            const tVal = ExcelCore.getCellValue(sheet, row, 20);
+            if (tVal === '계') {
+                const boxVal = ExcelCore.getCellValue(sheet, row, 24);
                 if (boxVal && parseInt(boxVal) > 0) {
                     storeBoxSum += parseInt(boxVal);
                 }

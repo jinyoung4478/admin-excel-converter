@@ -264,6 +264,20 @@ fn find_store_blocks(range: &calamine::Range<Data>) -> Vec<StoreBlock> {
                 });
             }
         }
+
+        if let Some(cell) = row.get(19) {
+            let value = cell_to_string(cell);
+            if let Some(store_name) = extract_store_name(&value) {
+                blocks.push(StoreBlock {
+                    store_name,
+                    row: row_idx as u32,
+                    col_no: 19,
+                    col_afternoon: 20,
+                    col_product: 22,
+                    col_box: 23,
+                });
+            }
+        }
     }
 
     blocks
@@ -345,6 +359,17 @@ fn get_day_totals(range: &calamine::Range<Data>) -> (i32, i32) {
         if let Some(cell) = row.get(10) {
             if cell_to_string(cell) == "계" {
                 if let Some(box_cell) = row.get(14) {
+                    let val = cell_to_int(box_cell);
+                    if val > 0 {
+                        store_box_sum += val;
+                    }
+                }
+            }
+        }
+
+        if let Some(cell) = row.get(19) {
+            if cell_to_string(cell) == "계" {
+                if let Some(box_cell) = row.get(23) {
                     let val = cell_to_int(box_cell);
                     if val > 0 {
                         store_box_sum += val;
