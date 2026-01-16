@@ -2,112 +2,136 @@
  * 엑셀 변환 앱 - 탭 관리 및 컨버터 레지스트리
  */
 
-// 컨버터 임포트
-import hyundaiConverter from './converters/hyundai.js?v=7';
+import hyundaiConverter from './converters/hyundai.js?v=8';
 
-// 등록된 컨버터 목록
+// ========== 상수 ==========
+const DOM_IDS = {
+    TAB_LIST: 'tab-list',
+    TAB_CONTENTS: 'tab-contents'
+};
+
+const CSS_CLASSES = {
+    TAB_BTN: 'tab-btn',
+    TAB_CONTENT: 'tab-content',
+    ACTIVE: 'active'
+};
+
+const DATA_ATTRS = {
+    TAB: 'tab',
+    INITIALIZED: 'initialized'
+};
+
+// ========== 상태 ==========
 const converters = [
-    hyundaiConverter,
+    hyundaiConverter
     // 새 컨버터 추가시 여기에 임포트하여 추가
-    // import newConverter from './converters/new.js';
 ];
 
-// 현재 활성 탭
-let activeTab = null;
+let activeTabId = null;
 
-// 탭 UI 생성
+// ========== 탭 요소 생성 ==========
+
+function createTabButton(converter, isActive) {
+    const button = document.createElement('button');
+    button.className = isActive
+        ? `${CSS_CLASSES.TAB_BTN} ${CSS_CLASSES.ACTIVE}`
+        : CSS_CLASSES.TAB_BTN;
+    button.dataset[DATA_ATTRS.TAB] = converter.id;
+    button.textContent = converter.name;
+    button.addEventListener('click', () => switchTab(converter.id));
+    return button;
+}
+
+function createTabContent(converter, isActive) {
+    const content = document.createElement('div');
+    content.className = isActive
+        ? `${CSS_CLASSES.TAB_CONTENT} ${CSS_CLASSES.ACTIVE}`
+        : CSS_CLASSES.TAB_CONTENT;
+    content.id = buildTabContentId(converter.id);
+    content.dataset[DATA_ATTRS.INITIALIZED] = 'false';
+    return content;
+}
+
+function buildTabContentId(tabId) {
+    return `tab-${tabId}`;
+}
+
+// ========== 탭 관리 ==========
+
 function createTabs() {
-    const tabList = document.getElementById('tab-list');
-    const tabContents = document.getElementById('tab-contents');
+    const tabList = document.getElementById(DOM_IDS.TAB_LIST);
+    const tabContents = document.getElementById(DOM_IDS.TAB_CONTENTS);
 
     converters.forEach((converter, index) => {
-        // 탭 버튼 생성
-        const tabBtn = document.createElement('button');
-        tabBtn.className = 'tab-btn' + (index === 0 ? ' active' : '');
-        tabBtn.dataset.tab = converter.id;
-        tabBtn.textContent = converter.name;
-        tabBtn.addEventListener('click', () => switchTab(converter.id));
-        tabList.appendChild(tabBtn);
-
-        // 탭 콘텐츠 영역 생성
-        const tabContent = document.createElement('div');
-        tabContent.className = 'tab-content' + (index === 0 ? ' active' : '');
-        tabContent.id = `tab-${converter.id}`;
-        tabContent.dataset.initialized = 'false';
-        tabContents.appendChild(tabContent);
+        const isFirst = index === 0;
+        tabList.appendChild(createTabButton(converter, isFirst));
+        tabContents.appendChild(createTabContent(converter, isFirst));
     });
 
-    // 첫 번째 탭 초기화
     if (converters.length > 0) {
-        initializeTab(converters[0].id);
-        activeTab = converters[0].id;
+        const firstConverter = converters[0];
+        initializeTab(firstConverter.id);
+        activeTabId = firstConverter.id;
     }
 }
 
-// 탭 전환
 function switchTab(tabId) {
-    if (activeTab === tabId) return;
+    if (activeTabId === tabId) return;
 
-    // 이전 탭 비활성화
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.tab === tabId);
-    });
-
-    document.querySelectorAll('.tab-content').forEach(content => {
-        content.classList.toggle('active', content.id === `tab-${tabId}`);
-    });
-
-    // 탭 초기화 (최초 접근시)
+    updateTabButtonStates(tabId);
+    updateTabContentVisibility(tabId);
     initializeTab(tabId);
-    activeTab = tabId;
+    activeTabId = tabId;
 }
 
-// 탭 초기화
+function updateTabButtonStates(activeId) {
+    document.querySelectorAll(`.${CSS_CLASSES.TAB_BTN}`).forEach(btn => {
+        btn.classList.toggle(CSS_CLASSES.ACTIVE, btn.dataset[DATA_ATTRS.TAB] === activeId);
+    });
+}
+
+function updateTabContentVisibility(activeId) {
+    document.querySelectorAll(`.${CSS_CLASSES.TAB_CONTENT}`).forEach(content => {
+        content.classList.toggle(CSS_CLASSES.ACTIVE, content.id === buildTabContentId(activeId));
+    });
+}
+
 function initializeTab(tabId) {
-    const tabContent = document.getElementById(`tab-${tabId}`);
-    if (tabContent.dataset.initialized === 'true') return;
+    const tabContent = document.getElementById(buildTabContentId(tabId));
+    if (!tabContent || tabContent.dataset[DATA_ATTRS.INITIALIZED] === 'true') return;
 
     const converter = converters.find(c => c.id === tabId);
-    if (converter && converter.init) {
+    if (converter?.init) {
         converter.init(tabContent);
-        tabContent.dataset.initialized = 'true';
+        tabContent.dataset[DATA_ATTRS.INITIALIZED] = 'true';
     }
 }
 
-// 컨버터 등록 API (동적 추가용)
+// ========== 동적 컨버터 등록 ==========
+
 function registerConverter(converter) {
     converters.push(converter);
-    // 이미 DOM이 로드되었으면 탭 추가
-    if (document.getElementById('tab-list')) {
-        addConverterTab(converter);
+
+    const tabList = document.getElementById(DOM_IDS.TAB_LIST);
+    if (tabList) {
+        appendConverterTab(converter);
     }
 }
 
-// 단일 컨버터 탭 추가
-function addConverterTab(converter) {
-    const tabList = document.getElementById('tab-list');
-    const tabContents = document.getElementById('tab-contents');
+function appendConverterTab(converter) {
+    const tabList = document.getElementById(DOM_IDS.TAB_LIST);
+    const tabContents = document.getElementById(DOM_IDS.TAB_CONTENTS);
 
-    const tabBtn = document.createElement('button');
-    tabBtn.className = 'tab-btn';
-    tabBtn.dataset.tab = converter.id;
-    tabBtn.textContent = converter.name;
-    tabBtn.addEventListener('click', () => switchTab(converter.id));
-    tabList.appendChild(tabBtn);
-
-    const tabContent = document.createElement('div');
-    tabContent.className = 'tab-content';
-    tabContent.id = `tab-${converter.id}`;
-    tabContent.dataset.initialized = 'false';
-    tabContents.appendChild(tabContent);
+    tabList.appendChild(createTabButton(converter, false));
+    tabContents.appendChild(createTabContent(converter, false));
 }
 
-// 앱 초기화
-document.addEventListener('DOMContentLoaded', () => {
-    createTabs();
-});
+// ========== 초기화 ==========
 
-// 외부 API 노출
+document.addEventListener('DOMContentLoaded', createTabs);
+
+// ========== 외부 API ==========
+
 window.ExcelConverterApp = {
     registerConverter,
     switchTab,
