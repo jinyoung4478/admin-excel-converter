@@ -333,11 +333,23 @@ fn extract_products_from_block(
 
 // 각 요일 시트에서 F8 셀의 Box 합계 추출
 fn get_original_box_total(range: &calamine::Range<Data>) -> i32 {
-    // F8 셀 - Range가 2행부터 시작하므로 rows().nth(6) = 8행
-    // (2 + 6 = 8행), F열 = 5번째 열(0-indexed)
+    // F8 셀 (1-indexed row 8, col F)
+    // Range 시작점에 따라 동적으로 인덱스 계산
+    // 실제 8행 = 0-indexed row 7
+    // Range.start().0 = start_row (0-indexed)
+    // relative_row = 7 - start_row
+    let start_row = range.start().map(|(r, _)| r as usize).unwrap_or(0);
+    let target_row = 7; // 8행 (0-indexed)
+    
+    if target_row < start_row {
+        return 0;
+    }
+    
+    let relative_row = target_row - start_row;
+    
     range.rows()
-        .nth(6)
-        .and_then(|row| row.get(5))
+        .nth(relative_row)
+        .and_then(|row| row.get(5)) // F열 = 0-indexed col 5
         .map(cell_to_int)
         .unwrap_or(0)
 }
