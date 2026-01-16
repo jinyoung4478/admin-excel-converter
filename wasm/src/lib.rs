@@ -45,8 +45,7 @@ pub struct ValidationRow {
     pub date: String,
     pub day_name: String,
     pub extracted_box: i32,
-    pub original_total: i32,
-    pub original_store_sum: i32,
+    pub original_box: i32,
     pub result: String,
 }
 
@@ -332,54 +331,15 @@ fn extract_products_from_block(
     products
 }
 
-// 요일별 총계 추출
-fn get_day_totals(range: &calamine::Range<Data>) -> (i32, i32) {
-    let total_box = range.rows().nth(7)
+// 각 요일 시트에서 F8 셀의 Box 합계 추출
+fn get_original_box_total(range: &calamine::Range<Data>) -> i32 {
+    // F8 셀 - Range가 2행부터 시작하므로 rows().nth(6) = 8행
+    // (2 + 6 = 8행), F열 = 5번째 열(0-indexed)
+    range.rows()
+        .nth(6)
         .and_then(|row| row.get(5))
         .map(cell_to_int)
-        .unwrap_or(0);
-
-    let mut store_box_sum = 0;
-    for (row_idx, row) in range.rows().enumerate() {
-        if row_idx < 34 {
-            continue;
-        }
-
-        if let Some(cell) = row.get(1) {
-            if cell_to_string(cell) == "계" {
-                if let Some(box_cell) = row.get(5) {
-                    let val = cell_to_int(box_cell);
-                    if val > 0 {
-                        store_box_sum += val;
-                    }
-                }
-            }
-        }
-
-        if let Some(cell) = row.get(10) {
-            if cell_to_string(cell) == "계" {
-                if let Some(box_cell) = row.get(14) {
-                    let val = cell_to_int(box_cell);
-                    if val > 0 {
-                        store_box_sum += val;
-                    }
-                }
-            }
-        }
-
-        if let Some(cell) = row.get(19) {
-            if cell_to_string(cell) == "계" {
-                if let Some(box_cell) = row.get(23) {
-                    let val = cell_to_int(box_cell);
-                    if val > 0 {
-                        store_box_sum += val;
-                    }
-                }
-            }
-        }
-    }
-
-    (total_box, store_box_sum)
+        .unwrap_or(0)
 }
 
 // 메인 변환 함수 - JSON 결과 반환 (Excel 생성은 JS에서)
@@ -481,18 +441,18 @@ fn convert_internal(
             }
         }
 
-        // 검증 데이터
-        let (original_total, original_store_sum) = get_day_totals(&range);
+        // 검증 데이터 (각 요일 시트의 F8 셀 기준)
+        let original_box = get_original_box_total(&range);
         let extracted_box: i32 = all_data.iter()
             .filter(|r| r.date == date_str)
             .map(|r| r.box_qty)
             .sum();
 
-        let result = if original_store_sum > 0 {
-            if extracted_box == original_store_sum {
+        let result = if original_box > 0 {
+            if extracted_box == original_box {
                 "일치".to_string()
             } else {
-                format!("불일치 (차이: {})", extracted_box - original_store_sum)
+                format!("불일치 (차이: {})", extracted_box - original_box)
             }
         } else {
             "원본 데이터 없음".to_string()
@@ -502,8 +462,7 @@ fn convert_internal(
             date: date_str,
             day_name: day_name.to_string(),
             extracted_box,
-            original_total,
-            original_store_sum,
+            original_box,
             result,
         });
     }

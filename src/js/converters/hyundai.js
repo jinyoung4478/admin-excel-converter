@@ -183,52 +183,11 @@ function extractProductsFromBlock(sheet, block, maxProducts = 25) {
     return products;
 }
 
-// 요일 시트에서 총계 추출
-function getDaySheetTotals(workbook, dayDates) {
-    const results = {};
-
-    for (const [dayName, date] of Object.entries(dayDates)) {
-        if (!workbook.SheetNames.includes(dayName)) continue;
-
-        const sheet = workbook.Sheets[dayName];
-
-        let totalBox = ExcelCore.getCellValue(sheet, 8, 6);
-        totalBox = parseInt(totalBox) || 0;
-
-        let storeBoxSum = 0;
-        const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
-
-        for (let row = 35; row <= range.e.r + 1; row++) {
-            const bVal = ExcelCore.getCellValue(sheet, row, 2);
-            const kVal = ExcelCore.getCellValue(sheet, row, 11);
-
-            if (bVal === '계') {
-                const boxVal = ExcelCore.getCellValue(sheet, row, 6);
-                if (boxVal && parseInt(boxVal) > 0) {
-                    storeBoxSum += parseInt(boxVal);
-                }
-            }
-
-            if (kVal === '계') {
-                const boxVal = ExcelCore.getCellValue(sheet, row, 15);
-                if (boxVal && parseInt(boxVal) > 0) {
-                    storeBoxSum += parseInt(boxVal);
-                }
-            }
-
-            const tVal = ExcelCore.getCellValue(sheet, row, 20);
-            if (tVal === '계') {
-                const boxVal = ExcelCore.getCellValue(sheet, row, 24);
-                if (boxVal && parseInt(boxVal) > 0) {
-                    storeBoxSum += parseInt(boxVal);
-                }
-            }
-        }
-
-        results[dayName] = { totalBox, storeBoxSum };
-    }
-
-    return results;
+// 각 요일 시트에서 F8 셀의 Box 합계 추출
+function getOriginalBoxTotal(sheet) {
+    // F8 셀 (1-indexed: row=8, col=6)
+    const val = ExcelCore.getCellValue(sheet, 8, 6);
+    return parseInt(val) || 0;
 }
 
 // JS 변환 함수
@@ -280,23 +239,23 @@ function convertDataJS(originWorkbook, mapping, fileName) {
         }
     }
 
-    // 검증 데이터
-    const daySheetTotals = getDaySheetTotals(originWorkbook, dayDates);
+    // 검증 데이터 (각 요일 시트의 F8 셀 기준)
     const validationData = [];
 
     for (const [dayName, date] of Object.entries(dayDates)) {
+        if (!originWorkbook.SheetNames.includes(dayName)) continue;
+
+        const sheet = originWorkbook.Sheets[dayName];
         const dateStr = ExcelCore.formatDate(date);
         const extractedBox = allData
             .filter(row => row['일자'] === dateStr)
             .reduce((sum, row) => sum + row['Box 입수'], 0);
 
-        const sheetData = daySheetTotals[dayName] || {};
-        const originalTotal = sheetData.totalBox || 0;
-        const originalStoreSum = sheetData.storeBoxSum || 0;
+        const originalBox = getOriginalBoxTotal(sheet);
 
         let matchResult;
-        if (originalStoreSum > 0) {
-            matchResult = extractedBox === originalStoreSum ? '일치' : `불일치 (차이: ${extractedBox - originalStoreSum})`;
+        if (originalBox > 0) {
+            matchResult = extractedBox === originalBox ? '일치' : `불일치 (차이: ${extractedBox - originalBox})`;
         } else {
             matchResult = '원본 데이터 없음';
         }
@@ -305,8 +264,7 @@ function convertDataJS(originWorkbook, mapping, fileName) {
             '일자': dateStr,
             '요일': dayName,
             '추출 Box 합계': extractedBox,
-            '원본 시트 총 계': originalTotal,
-            '원본 시트 개별매장 합계': originalStoreSum,
+            '원본 Box 합계': originalBox,
             '검증 결과': matchResult
         });
     }
@@ -376,8 +334,7 @@ async function convert() {
                 '일자': r.date,
                 '요일': r.day_name,
                 '추출 Box 합계': r.extracted_box,
-                '원본 시트 총 계': r.original_total,
-                '원본 시트 개별매장 합계': r.original_store_sum,
+                '원본 Box 합계': r.original_box,
                 '검증 결과': r.result
             })),
             storeDaily: result.store_daily.map(r => ({
