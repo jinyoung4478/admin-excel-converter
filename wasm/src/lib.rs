@@ -36,6 +36,7 @@ pub struct DataRow {
     pub store_name: String,
     pub product_name: String,
     pub box_qty: i32,
+    pub afternoon: String,
 }
 
 // 검증 데이터 행
@@ -75,6 +76,7 @@ struct StoreBlock {
     store_name: String,
     row: u32,
     col_no: u32,
+    col_afternoon: u32,
     col_product: u32,
     col_box: u32,
 }
@@ -242,6 +244,7 @@ fn find_store_blocks(range: &calamine::Range<Data>) -> Vec<StoreBlock> {
                     store_name,
                     row: row_idx as u32,
                     col_no: 1,
+                    col_afternoon: 2,
                     col_product: 4,
                     col_box: 5,
                 });
@@ -255,6 +258,7 @@ fn find_store_blocks(range: &calamine::Range<Data>) -> Vec<StoreBlock> {
                     store_name,
                     row: row_idx as u32,
                     col_no: 10,
+                    col_afternoon: 11,
                     col_product: 13,
                     col_box: 14,
                 });
@@ -270,7 +274,7 @@ fn extract_products_from_block(
     range: &calamine::Range<Data>,
     block: &StoreBlock,
     max_products: usize,
-) -> Vec<(String, i32)> {
+) -> Vec<(String, i32, String)> {
     let mut products = Vec::new();
     let start_row = block.row as usize + 4;
 
@@ -300,7 +304,14 @@ fn extract_products_from_block(
                 continue;
             }
 
-            products.push((product_name.trim().to_string(), box_qty));
+            // 오후 진열 값 추출
+            let afternoon = row.get(block.col_afternoon as usize)
+                .map(cell_to_string)
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+
+            products.push((product_name.trim().to_string(), box_qty, afternoon));
         }
     }
 
@@ -433,13 +444,14 @@ fn convert_internal(
 
             let products = extract_products_from_block(&range, block, 25);
 
-            for (product_name, box_qty) in products {
+            for (product_name, box_qty, afternoon) in products {
                 all_data.push(DataRow {
                     date: date_str.clone(),
                     code: code.clone(),
                     store_name: system_name.clone(),
                     product_name,
                     box_qty,
+                    afternoon,
                 });
             }
         }

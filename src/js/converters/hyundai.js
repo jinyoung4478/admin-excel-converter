@@ -116,6 +116,7 @@ function findStoreBlocks(sheet) {
                 storeName: bStore,
                 row: row,
                 colNo: 2,
+                colAfternoon: 3,
                 colProduct: 5,
                 colBox: 6
             });
@@ -128,6 +129,7 @@ function findStoreBlocks(sheet) {
                 storeName: kStore,
                 row: row,
                 colNo: 11,
+                colAfternoon: 12,
                 colProduct: 14,
                 colBox: 15
             });
@@ -153,10 +155,15 @@ function extractProductsFromBlock(sheet, block, maxProducts = 25) {
         boxQty = parseInt(boxQty) || 0;
         if (boxQty === 0) continue;
 
+        // 오후 진열 값 추출
+        const afternoonVal = ExcelCore.getCellValue(sheet, row, block.colAfternoon);
+        const afternoon = afternoonVal ? String(afternoonVal).trim() : '';
+
         products.push({
             storeName: block.storeName,
             productName: String(productName).trim(),
-            boxQty: boxQty
+            boxQty: boxQty,
+            afternoon: afternoon
         });
     }
 
@@ -245,7 +252,8 @@ function convertDataJS(originWorkbook, mapping, fileName) {
                     '코드': code,
                     '사업장명': systemName,
                     '품목명': product.productName,
-                    'Box 입수': product.boxQty
+                    'Box 입수': product.boxQty,
+                    '오후 진열': product.afternoon
                 });
             }
         }
@@ -340,7 +348,8 @@ async function convert() {
                 '코드': r.code,
                 '사업장명': r.store_name,
                 '품목명': r.product_name,
-                'Box 입수': r.box_qty
+                'Box 입수': r.box_qty,
+                '오후 진열': r.afternoon || ''
             })),
             validation: result.validation.map(r => ({
                 '일자': r.date,
