@@ -68,20 +68,25 @@ function extractStoreName(cellValue) {
     return match ? match[1].trim() : null;
 }
 
-// 날짜 추출 (파일명에서)
-function extractDateFromFileName(fileName) {
-    const dateMatch = fileName.match(/\((\d+)\.(\d+)~(\d+)\.(\d+)\)/);
-    const yearMatch = fileName.match(/(\d+)년\s*(\d+)월/);
-
-    if (dateMatch && yearMatch) {
-        let year = parseInt(yearMatch[1]);
-        if (year < 100) year += 2000;
-        const month = parseInt(dateMatch[1]) - 1;
-        const day = parseInt(dateMatch[2]);
-        return new Date(year, month, day);
+// 날짜 추출 (시트 B2 셀에서)
+// B2 예시: "... (26.1.19 월요일)", "... (26.11.1 목요일)"
+function extractDateFromSheet(sheet, sheetName) {
+    const b2 = ExcelCore.getCellValue(sheet, 2, 2);
+    if (!b2 || typeof b2 !== 'string') {
+        throw new Error(`[${sheetName}] 시트 B2 셀에 날짜 정보가 없습니다.`);
     }
 
-    return new Date();
+    const match = b2.match(/\((\d+)\.(\d+)\.(\d+)\s*[월화수목금]요일\)/);
+    if (!match) {
+        throw new Error(`[${sheetName}] 시트 B2 셀에서 날짜를 인식할 수 없습니다: "${b2}"`);
+    }
+
+    let year = parseInt(match[1]);
+    if (year < 100) year += 2000;
+    const month = parseInt(match[2]);
+    const day = parseInt(match[3]);
+
+    return new Date(year, month - 1, day);
 }
 
 // 매핑 테이블 파싱
@@ -191,23 +196,20 @@ function getOriginalBoxTotal(sheet) {
 }
 
 // JS 변환 함수
-function convertDataJS(originWorkbook, mapping, fileName) {
+function convertDataJS(originWorkbook, mapping) {
     const dayNames = ['월', '화', '수', '목', '금'];
-    const baseDate = extractDateFromFileName(fileName);
 
     const dayDates = {};
-    dayNames.forEach((day, idx) => {
-        const date = new Date(baseDate);
-        date.setDate(date.getDate() + idx);
-        dayDates[day] = date;
-    });
+    for (const day of dayNames) {
+        if (!originWorkbook.SheetNames.includes(day)) continue;
+        const sheet = originWorkbook.Sheets[day];
+        dayDates[day] = extractDateFromSheet(sheet, day);
+    }
 
     const allData = [];
     const mappingFailures = [];
 
     for (const [dayName, date] of Object.entries(dayDates)) {
-        if (!originWorkbook.SheetNames.includes(dayName)) continue;
-
         const sheet = originWorkbook.Sheets[dayName];
         const storeBlocks = findStoreBlocks(sheet);
 
@@ -401,7 +403,7 @@ async function convert() {
         ]);
 
         const mapping = parseMappingTable(mappingWorkbook);
-        const result = convertDataJS(originWorkbook, mapping, originFile.name);
+        const result = convertDataJS(originWorkbook, mapping);
         const workbook = createResultWorkbookJS(result);
 
         const outputFileName = originFile.name.replace(/\.xlsx?$/i, '_result.xlsx');
