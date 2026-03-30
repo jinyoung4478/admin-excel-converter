@@ -179,6 +179,7 @@ function extractProductsFromBlock(sheet, block, maxProducts = 25) {
 
         products.push({
             storeName: block.storeName,
+            productCode: String(noVal).trim(),
             productName: String(productName).trim(),
             boxQty: boxQty,
             afternoon: afternoon
@@ -242,6 +243,7 @@ function convertDataJS(originWorkbook, mapping) {
                     '코드': code,
                     '원본 사업장명': storeName,
                     '사업장명': systemName,
+                    '단품코드': product.productCode,
                     '품목명': product.productName,
                     'Box 입수': product.boxQty,
                     '오후 진열': product.afternoon,
@@ -366,6 +368,7 @@ async function convert() {
                 '코드': r.code,
                 '원본 사업장명': r.original_store_name,
                 '사업장명': r.store_name,
+                '단품코드': r.product_code || '',
                 '품목명': r.product_name,
                 'Box 입수': r.box_qty,
                 '오후 진열': r.afternoon || '',
