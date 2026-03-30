@@ -52,6 +52,7 @@ pub struct ValidationRow {
     pub result: String,
     pub mapping_failure_stores: i32,  // 매핑실패 매장 수 (중복 제거)
     pub mapping_failure_rows: i32,     // 매핑실패 데이터 수
+    pub product_code_failures: i32,    // 단품코드 매핑실패 수
 }
 
 // 매장별 상세 행
@@ -292,7 +293,7 @@ fn extract_products_from_block(
     range: &calamine::Range<Data>,
     block: &StoreBlock,
     max_products: usize,
-) -> Vec<(String, String, i32, String)> {
+) -> Vec<(String, i32, String)> {
     let mut products = Vec::new();
     let start_row = block.row as usize + 4;
 
@@ -329,11 +330,49 @@ fn extract_products_from_block(
                 .trim()
                 .to_string();
 
-            products.push((no_val.trim().to_string(), product_name.trim().to_string(), box_qty, afternoon));
+            products.push((product_name.trim().to_string(), box_qty, afternoon));
         }
     }
 
     products
+}
+
+// 층별 시트에서 단품명 → 단품코드(바코드) 매핑 구축
+fn build_product_code_map(workbook: &mut Xlsx<Cursor<&[u8]>>) -> HashMap<String, String> {
+    let mut product_code_map = HashMap::new();
+    let floor_re = Regex::new(r"^\d+\(").unwrap();
+
+    let sheet_names = workbook.sheet_names().to_vec();
+    for sheet_name in &sheet_names {
+        if !floor_re.is_match(sheet_name) {
+            continue;
+        }
+
+        let range = match workbook.worksheet_range(sheet_name) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+
+        // Row 7 (0-indexed) is header, data starts at row 7+
+        for row in range.rows().skip(7) {
+            let product_code = row.get(2).map(cell_to_string).unwrap_or_default();  // C열: 단품코드
+            let product_name = row.get(3).map(cell_to_string).unwrap_or_default();  // D열: 단품명
+
+            let name = product_name.trim().to_string();
+            let code = product_code.trim().to_string();
+
+            if !name.is_empty() && !code.is_empty() {
+                product_code_map.entry(name).or_insert(code);
+            }
+        }
+
+        // 하나의 층별 시트에서 충분 (모두 같은 단품 목록)
+        if !product_code_map.is_empty() {
+            break;
+        }
+    }
+
+    product_code_map
 }
 
 // 각 요일 시트에서 F8 셀의 Box 합계 추출
@@ -412,6 +451,10 @@ fn convert_internal(
     let sheet_names = workbook.sheet_names().to_vec();
     console_log!("WASM: Origin loaded - {} sheets", sheet_names.len());
 
+    // 층별 시트에서 단품명 → 단품코드(바코드) 매핑 구축
+    let product_code_map = build_product_code_map(&mut workbook);
+    console_log!("WASM: Product code map built - {} entries", product_code_map.len());
+
     let day_names = ["월", "화", "수", "목", "금"];
     let (base_year, base_month, base_day) = extract_date_from_filename(filename);
 
@@ -459,7 +502,10 @@ fn convert_internal(
 
             let products = extract_products_from_block(&range, block, 25);
 
-            for (product_code, product_name, box_qty, afternoon) in products {
+            for (product_name, box_qty, afternoon) in products {
+                let product_code = product_code_map.get(&product_name)
+                    .cloned()
+                    .unwrap_or_else(|| "단품코드 매핑실패".to_string());
                 all_data.push(DataRow {
                     date: date_str.clone(),
                     code: code.clone(),
@@ -501,6 +547,11 @@ fn convert_internal(
             .filter(|r| r.date == date_str && r.mapping_failed == "Y")
             .count() as i32;
 
+        // 단품코드 매핑실패 수
+        let product_code_failures = all_data.iter()
+            .filter(|r| r.date == date_str && r.product_code == "단품코드 매핑실패")
+            .count() as i32;
+
         validation.push(ValidationRow {
             date: date_str,
             day_name: day_name.to_string(),
@@ -509,6 +560,7 @@ fn convert_internal(
             result,
             mapping_failure_stores,
             mapping_failure_rows,
+            product_code_failures,
         });
     }
 

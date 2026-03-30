@@ -179,7 +179,6 @@ function extractProductsFromBlock(sheet, block, maxProducts = 25) {
 
         products.push({
             storeName: block.storeName,
-            productCode: String(noVal).trim(),
             productName: String(productName).trim(),
             boxQty: boxQty,
             afternoon: afternoon
@@ -187,6 +186,35 @@ function extractProductsFromBlock(sheet, block, maxProducts = 25) {
     }
 
     return products;
+}
+
+// 층별 시트에서 단품명 → 단품코드(바코드) 매핑 구축
+function buildProductCodeMap(workbook) {
+    const productCodeMap = {};
+    const floorSheetPattern = /^\d+\(/;  // "4(76)", "5(247)" 등
+
+    for (const sheetName of workbook.SheetNames) {
+        if (!floorSheetPattern.test(sheetName)) continue;
+
+        const sheet = workbook.Sheets[sheetName];
+        const range = ExcelCore.decodeRange(sheet['!ref'] || 'A1');
+
+        for (let row = 8; row <= range.e.r + 1; row++) {
+            const productCode = ExcelCore.getCellValue(sheet, row, 3);  // C열: 단품코드
+            const productName = ExcelCore.getCellValue(sheet, row, 4);  // D열: 단품명
+            if (productCode && productName) {
+                const name = String(productName).trim();
+                if (name && !productCodeMap[name]) {
+                    productCodeMap[name] = String(productCode).trim();
+                }
+            }
+        }
+
+        // 하나의 층별 시트에서 충분 (모두 같은 단품 목록)
+        if (Object.keys(productCodeMap).length > 0) break;
+    }
+
+    return productCodeMap;
 }
 
 // 각 요일 시트에서 F8 셀의 Box 합계 추출
@@ -199,6 +227,9 @@ function getOriginalBoxTotal(sheet) {
 // JS 변환 함수
 function convertDataJS(originWorkbook, mapping) {
     const dayNames = ['월', '화', '수', '목', '금'];
+
+    // 층별 시트에서 단품명 → 단품코드(바코드) 매핑
+    const productCodeMap = buildProductCodeMap(originWorkbook);
 
     const dayDates = {};
     for (const day of dayNames) {
@@ -243,7 +274,7 @@ function convertDataJS(originWorkbook, mapping) {
                     '코드': code,
                     '원본 사업장명': storeName,
                     '사업장명': systemName,
-                    '단품코드': product.productCode,
+                    '단품코드': productCodeMap[product.productName] || '단품코드 매핑실패',
                     '품목명': product.productName,
                     'Box 입수': product.boxQty,
                     '오후 진열': product.afternoon,
@@ -285,6 +316,11 @@ function convertDataJS(originWorkbook, mapping) {
             .filter(row => row['일자'] === dateStr && row['매핑실패'] === 'Y')
             .length;
 
+        // 단품코드 매핑실패 수
+        const productCodeFailureRows = allData
+            .filter(row => row['일자'] === dateStr && row['단품코드'] === '단품코드 매핑실패')
+            .length;
+
         validationData.push({
             '일자': dateStr,
             '요일': dayName,
@@ -292,7 +328,8 @@ function convertDataJS(originWorkbook, mapping) {
             '원본 Box 합계': originalBox,
             '검증 결과': matchResult,
             '매핑실패 매장수': uniqueDayFailures.length,
-            '매핑실패 데이터수': mappingFailureRows
+            '매핑실패 데이터수': mappingFailureRows,
+            '단품코드 매핑실패': productCodeFailureRows
         });
     }
 
@@ -329,14 +366,21 @@ function createResultWorkbookJS(result) {
     const hasMappingFailures = result.validation.some(
         row => row['매핑실패 매장수'] > 0 || row['매핑실패 데이터수'] > 0
     );
-    
-    let validationData = result.validation;
-    if (!hasMappingFailures) {
-        validationData = result.validation.map(row => {
-            const { '매핑실패 매장수': _, '매핑실패 데이터수': __, ...rest } = row;
-            return rest;
-        });
-    }
+    const hasProductCodeFailures = result.validation.some(
+        row => row['단품코드 매핑실패'] > 0
+    );
+
+    let validationData = result.validation.map(row => {
+        const filtered = { ...row };
+        if (!hasMappingFailures) {
+            delete filtered['매핑실패 매장수'];
+            delete filtered['매핑실패 데이터수'];
+        }
+        if (!hasProductCodeFailures) {
+            delete filtered['단품코드 매핑실패'];
+        }
+        return filtered;
+    });
     
     ExcelCore.addSheet(workbook, validationData, '검증');
     ExcelCore.addSheet(workbook, result.storeDaily, '매장별 상세');
@@ -368,7 +412,7 @@ async function convert() {
                 '코드': r.code,
                 '원본 사업장명': r.original_store_name,
                 '사업장명': r.store_name,
-                '단품코드': r.product_code || '',
+                '단품코드': r.product_code,
                 '품목명': r.product_name,
                 'Box 입수': r.box_qty,
                 '오후 진열': r.afternoon || '',
@@ -381,7 +425,8 @@ async function convert() {
                 '원본 Box 합계': r.original_box,
                 '검증 결과': r.result,
                 '매핑실패 매장수': r.mapping_failure_stores,
-                '매핑실패 데이터수': r.mapping_failure_rows
+                '매핑실패 데이터수': r.mapping_failure_rows,
+                '단품코드 매핑실패': r.product_code_failures
             })),
             storeDaily: result.store_daily.map(r => ({
                 '일자': r.date,
