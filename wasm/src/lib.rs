@@ -35,6 +35,7 @@ pub struct DataRow {
     pub code: String,
     pub original_store_name: String,
     pub store_name: String,
+    pub product_code: String,
     pub product_name: String,
     pub box_qty: i32,
     pub afternoon: String,
@@ -291,7 +292,7 @@ fn extract_products_from_block(
     range: &calamine::Range<Data>,
     block: &StoreBlock,
     max_products: usize,
-) -> Vec<(String, i32, String)> {
+) -> Vec<(String, String, i32, String)> {
     let mut products = Vec::new();
     let start_row = block.row as usize + 4;
 
@@ -328,7 +329,7 @@ fn extract_products_from_block(
                 .trim()
                 .to_string();
 
-            products.push((product_name.trim().to_string(), box_qty, afternoon));
+            products.push((no_val.trim().to_string(), product_name.trim().to_string(), box_qty, afternoon));
         }
     }
 
@@ -458,12 +459,13 @@ fn convert_internal(
 
             let products = extract_products_from_block(&range, block, 25);
 
-            for (product_name, box_qty, afternoon) in products {
+            for (product_code, product_name, box_qty, afternoon) in products {
                 all_data.push(DataRow {
                     date: date_str.clone(),
                     code: code.clone(),
                     original_store_name: block.store_name.clone(),
                     store_name: system_name.clone(),
+                    product_code,
                     product_name,
                     box_qty,
                     afternoon,
