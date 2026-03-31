@@ -214,11 +214,12 @@ const ExcelCore = {
                     }
                 });
                 
-                // 열 너비 자동 조정
+                // 열 너비 자동 조정 + 텍스트 컬럼 포맷 설정
+                const textColumns = ['단품코드', '코드'];
                 headers.forEach((header, idx) => {
                     const column = worksheet.getColumn(idx + 1);
                     let maxLength = header.length;
-                    
+
                     sheetInfo.data.forEach(row => {
                         const value = row[header];
                         if (value) {
@@ -226,8 +227,13 @@ const ExcelCore = {
                             maxLength = Math.max(maxLength, len);
                         }
                     });
-                    
+
                     column.width = Math.min(maxLength + 2, 50);
+
+                    // 바코드 등 숫자형 텍스트는 문자열 형식으로 유지 (선행 0 보존)
+                    if (textColumns.includes(header)) {
+                        column.numFmt = '@';
+                    }
                 });
             }
         }

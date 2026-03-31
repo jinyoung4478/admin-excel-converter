@@ -180,6 +180,22 @@ fn cell_to_int(cell: &Data) -> i32 {
     }
 }
 
+// 셀 값을 바코드 문자열로 (선행 0 보존, 소수점 제거)
+fn cell_to_barcode(cell: &Data) -> String {
+    match cell {
+        Data::String(s) => s.clone(),
+        Data::Float(f) => {
+            if *f == (*f as i64) as f64 {
+                format!("{}", *f as i64)
+            } else {
+                format!("{}", f)
+            }
+        }
+        Data::Int(i) => format!("{}", i),
+        _ => String::new(),
+    }
+}
+
 // 매핑 테이블 파싱
 fn parse_mapping_table(data: &[u8]) -> Result<HashMap<String, MappingEntry>, String> {
     let cursor = Cursor::new(data);
@@ -340,11 +356,16 @@ fn extract_products_from_block(
 // 층별 시트에서 단품명 → 단품코드(바코드) 매핑 구축
 fn build_product_code_map(workbook: &mut Xlsx<Cursor<&[u8]>>) -> HashMap<String, String> {
     let mut product_code_map = HashMap::new();
-    let floor_re = Regex::new(r"^\d+\(").unwrap();
+    let skip_sheets: Vec<&str> = vec!["월", "화", "수", "목", "금"];
 
     let sheet_names = workbook.sheet_names().to_vec();
     for sheet_name in &sheet_names {
-        if !floor_re.is_match(sheet_name) {
+        // 요일 시트 및 특수문자(☆※★) 시작 시트 제외
+        if skip_sheets.contains(&sheet_name.as_str()) {
+            continue;
+        }
+        let first_char = sheet_name.chars().next().unwrap_or(' ');
+        if first_char == '☆' || first_char == '※' || first_char == '★' {
             continue;
         }
 
@@ -353,9 +374,19 @@ fn build_product_code_map(workbook: &mut Xlsx<Cursor<&[u8]>>) -> HashMap<String,
             Err(_) => continue,
         };
 
-        // Row 7 (0-indexed) is header, data starts at row 7+
+        // Row 7 (0-indexed 6) C열에 "단품코드" 헤더가 있는지 확인
+        let is_floor_sheet = range.rows().nth(6)
+            .and_then(|row| row.get(2))
+            .map(|cell| cell_to_string(cell).contains("단품코드"))
+            .unwrap_or(false);
+
+        if !is_floor_sheet {
+            continue;
+        }
+
+        // Row 8+ (0-indexed 7+) data
         for row in range.rows().skip(7) {
-            let product_code = row.get(2).map(cell_to_string).unwrap_or_default();  // C열: 단품코드
+            let product_code = row.get(2).map(cell_to_barcode).unwrap_or_default();  // C열: 단품코드
             let product_name = row.get(3).map(cell_to_string).unwrap_or_default();  // D열: 단품명
 
             let name = product_name.trim().to_string();

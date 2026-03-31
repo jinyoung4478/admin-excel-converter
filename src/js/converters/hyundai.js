@@ -191,12 +191,19 @@ function extractProductsFromBlock(sheet, block, maxProducts = 25) {
 // 층별 시트에서 단품명 → 단품코드(바코드) 매핑 구축
 function buildProductCodeMap(workbook) {
     const productCodeMap = {};
-    const floorSheetPattern = /^\d+\(/;  // "4(76)", "5(247)" 등
+    const skipSheets = new Set(['월', '화', '수', '목', '금']);
 
     for (const sheetName of workbook.SheetNames) {
-        if (!floorSheetPattern.test(sheetName)) continue;
+        // 요일 시트 및 특수문자(☆※★) 시작 시트 제외
+        if (skipSheets.has(sheetName)) continue;
+        if (/^[☆※★]/.test(sheetName)) continue;
 
         const sheet = workbook.Sheets[sheetName];
+
+        // Row 7 C열에 "단품코드" 헤더가 있는지 확인
+        const headerC = ExcelCore.getCellValue(sheet, 7, 3);
+        if (!headerC || !String(headerC).includes('단품코드')) continue;
+
         const range = ExcelCore.decodeRange(sheet['!ref'] || 'A1');
 
         for (let row = 8; row <= range.e.r + 1; row++) {
