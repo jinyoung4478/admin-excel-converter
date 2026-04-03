@@ -21,6 +21,10 @@ console_error_panic_hook = { version = "0.1", optional = true }
 # calamine for xlsx parsing
 calamine = "0.24"
 
+# xlsx XML direct parsing (for preserving t="str" formula results)
+quick-xml = "0.31"
+zip = { version = "0.6", default-features = false, features = ["deflate"] }
+
 # regex
 regex = "1.10"
 

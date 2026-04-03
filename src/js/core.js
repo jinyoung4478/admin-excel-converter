@@ -48,8 +48,10 @@ const ExcelCore = {
                                 if (cell.value && typeof cell.value === 'object') {
                                     if (cell.value.result !== undefined) {
                                         sheetData[cellAddress].v = cell.value.result;
+                                        sheetData[cellAddress].t = typeof cell.value.result === 'number' ? 'n' : 's';
                                     } else if (cell.value.text !== undefined) {
                                         sheetData[cellAddress].v = cell.value.text;
+                                        sheetData[cellAddress].t = 's';
                                     }
                                 }
                             });
@@ -203,19 +205,23 @@ const ExcelCore = {
                     headers.map((h, i) => textColumns.includes(h) ? i : -1).filter(i => i >= 0)
                 );
 
+                // 텍스트 컬럼은 데이터 추가 전에 서식을 먼저 설정
+                textColIndices.forEach(colIdx => {
+                    const column = worksheet.getColumn(colIdx + 1);
+                    column.numFmt = '@';
+                });
+
                 // 데이터 추가
                 sheetInfo.data.forEach((row, rowIndex) => {
-                    const values = headers.map(h => row[h]);
-                    const excelRow = worksheet.addRow(values);
-
-                    // 텍스트 컬럼 셀을 명시적 문자열로 설정 (선행 0 보존)
-                    textColIndices.forEach(colIdx => {
-                        const cell = excelRow.getCell(colIdx + 1);
-                        if (cell.value != null) {
-                            cell.value = String(cell.value);
-                            cell.numFmt = '@';
+                    // 텍스트 컬럼 값을 명시적 문자열로 변환 후 addRow
+                    const values = headers.map((h, i) => {
+                        const v = row[h];
+                        if (textColIndices.has(i) && v != null) {
+                            return String(v);
                         }
+                        return v;
                     });
+                    const excelRow = worksheet.addRow(values);
 
                     // 매핑 실패 행 스타일 적용 (_isMappingFailed 플래그 확인)
                     if (sheetInfo.name === '데이터' && row['_isMappingFailed']) {

@@ -1,8 +1,10 @@
 use calamine::{open_workbook_from_rs, Reader, Xlsx, Data};
+use quick_xml::events::Event;
+use quick_xml::reader::Reader as XmlReader;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::Cursor;
+use std::io::{Cursor, Read};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -354,13 +356,15 @@ fn extract_products_from_block(
 }
 
 // 층별 시트에서 단품명 → 단품코드(바코드) 매핑 구축
-fn build_product_code_map(workbook: &mut Xlsx<Cursor<&[u8]>>) -> HashMap<String, String> {
-    let mut product_code_map = HashMap::new();
+// calamine은 t="str" 수식 결과를 Float로 파싱하여 선행 0이 소실되므로,
+// xlsx XML을 직접 파싱하여 원본 문자열 값을 보존
+fn build_product_code_map(workbook: &mut Xlsx<Cursor<&[u8]>>, raw_data: &[u8]) -> HashMap<String, String> {
+    // 1단계: calamine으로 층별 시트 이름 찾기
     let skip_sheets: Vec<&str> = vec!["월", "화", "수", "목", "금"];
+    let mut floor_sheet_name: Option<String> = None;
 
     let sheet_names = workbook.sheet_names().to_vec();
     for sheet_name in &sheet_names {
-        // 요일 시트 및 특수문자(☆※★) 시작 시트 제외
         if skip_sheets.contains(&sheet_name.as_str()) {
             continue;
         }
@@ -374,32 +378,259 @@ fn build_product_code_map(workbook: &mut Xlsx<Cursor<&[u8]>>) -> HashMap<String,
             Err(_) => continue,
         };
 
-        // Row 7 (0-indexed 6) C열에 "단품코드" 헤더가 있는지 확인
         let is_floor_sheet = range.rows().nth(6)
             .and_then(|row| row.get(2))
             .map(|cell| cell_to_string(cell).contains("단품코드"))
             .unwrap_or(false);
 
-        if !is_floor_sheet {
-            continue;
+        if is_floor_sheet {
+            floor_sheet_name = Some(sheet_name.clone());
+            break;
         }
+    }
 
-        // Row 8+ (0-indexed 7+) data
-        for row in range.rows().skip(7) {
-            let product_code = row.get(2).map(cell_to_barcode).unwrap_or_default();  // C열: 단품코드
-            let product_name = row.get(3).map(cell_to_string).unwrap_or_default();  // D열: 단품명
+    let floor_sheet_name = match floor_sheet_name {
+        Some(name) => name,
+        None => return HashMap::new(),
+    };
 
-            let name = product_name.trim().to_string();
-            let code = product_code.trim().to_string();
+    // 2단계: xlsx XML에서 직접 파싱하여 문자열 값 보존
+    match build_product_code_map_from_xml(raw_data, &sheet_names, &floor_sheet_name) {
+        Ok(map) if !map.is_empty() => {
+            console_log!("WASM: Product code map from XML - {} entries", map.len());
+            map
+        }
+        _ => {
+            // XML 파싱 실패 시 calamine fallback
+            console_log!("WASM: XML parsing failed, using calamine fallback");
+            build_product_code_map_calamine(workbook, &floor_sheet_name)
+        }
+    }
+}
 
-            if !name.is_empty() && !code.is_empty() {
-                product_code_map.entry(name).or_insert(code);
+// xlsx XML을 직접 파싱하여 t="str" 셀의 원본 문자열 값 보존
+fn build_product_code_map_from_xml(
+    raw_data: &[u8],
+    _sheet_names: &[String],
+    floor_sheet_name: &str,
+) -> Result<HashMap<String, String>, String> {
+    let cursor = Cursor::new(raw_data);
+    let mut archive = zip::ZipArchive::new(cursor)
+        .map_err(|e| format!("zip open failed: {}", e))?;
+
+    // workbook.xml.rels에서 시트 파일 매핑 찾기
+    let rels_content = {
+        let mut rels_file = archive.by_name("xl/_rels/workbook.xml.rels")
+            .map_err(|e| format!("rels not found: {}", e))?;
+        let mut buf = String::new();
+        rels_file.read_to_string(&mut buf)
+            .map_err(|e| format!("rels read failed: {}", e))?;
+        buf
+    };
+
+    // workbook.xml에서 시트 이름 → rId 매핑
+    let wb_content = {
+        let mut wb_file = archive.by_name("xl/workbook.xml")
+            .map_err(|e| format!("workbook.xml not found: {}", e))?;
+        let mut buf = String::new();
+        wb_file.read_to_string(&mut buf)
+            .map_err(|e| format!("workbook.xml read failed: {}", e))?;
+        buf
+    };
+
+    // 시트 이름 → rId
+    let sheet_rid = {
+        let re = Regex::new(r#"<sheet [^>]*name="([^"]*)"[^>]*r:id="(rId\d+)""#).unwrap();
+        let mut found_rid = None;
+        for caps in re.captures_iter(&wb_content) {
+            let name = caps.get(1).unwrap().as_str();
+            if name == floor_sheet_name {
+                found_rid = Some(caps.get(2).unwrap().as_str().to_string());
+                break;
             }
         }
+        // name 속성이 뒤에 올 수도 있으므로 역순도 시도
+        if found_rid.is_none() {
+            let re2 = Regex::new(r#"<sheet [^>]*r:id="(rId\d+)"[^>]*name="([^"]*)""#).unwrap();
+            for caps in re2.captures_iter(&wb_content) {
+                let name = caps.get(2).unwrap().as_str();
+                if name == floor_sheet_name {
+                    found_rid = Some(caps.get(1).unwrap().as_str().to_string());
+                    break;
+                }
+            }
+        }
+        found_rid.ok_or_else(|| format!("rId not found for sheet: {}", floor_sheet_name))?
+    };
 
-        // 하나의 층별 시트에서 충분 (모두 같은 단품 목록)
-        if !product_code_map.is_empty() {
-            break;
+    // rId → Target (시트 파일 경로)
+    let sheet_target = {
+        let re = Regex::new(&format!(r#"Id="{}"[^>]*Target="([^"]*)""#, sheet_rid)).unwrap();
+        re.captures(&rels_content)
+            .and_then(|caps| caps.get(1))
+            .map(|m| m.as_str().to_string())
+            .ok_or_else(|| format!("Target not found for {}", sheet_rid))?
+    };
+
+    let sheet_path = format!("xl/{}", sheet_target);
+
+    // sharedStrings.xml 파싱 (인덱스 → 문자열)
+    let shared_strings = {
+        let mut strings = Vec::new();
+        if let Ok(mut ss_file) = archive.by_name("xl/sharedStrings.xml") {
+            let mut buf = String::new();
+            ss_file.read_to_string(&mut buf).ok();
+            let mut reader = XmlReader::from_str(&buf);
+            reader.trim_text(true);
+            let mut in_si = false;
+            let mut in_t = false;
+            let mut current_text = String::new();
+
+            loop {
+                match reader.read_event() {
+                    Ok(Event::Start(ref e)) if e.name().as_ref() == b"si" => {
+                        in_si = true;
+                        current_text.clear();
+                    }
+                    Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) if e.name().as_ref() == b"t" && in_si => {
+                        in_t = true;
+                    }
+                    Ok(Event::Text(ref e)) if in_t => {
+                        if let Ok(text) = e.unescape() {
+                            current_text.push_str(&text);
+                        }
+                    }
+                    Ok(Event::End(ref e)) if e.name().as_ref() == b"t" => {
+                        in_t = false;
+                    }
+                    Ok(Event::End(ref e)) if e.name().as_ref() == b"si" => {
+                        strings.push(current_text.clone());
+                        current_text.clear();
+                        in_si = false;
+                    }
+                    Ok(Event::Eof) => break,
+                    Err(_) => break,
+                    _ => {}
+                }
+            }
+        }
+        strings
+    };
+
+    // 시트 XML 파싱 - Row 8+의 C열(단품코드)과 D열(단품명)
+    let sheet_content = {
+        let mut sheet_file = archive.by_name(&sheet_path)
+            .map_err(|e| format!("sheet not found: {}: {}", sheet_path, e))?;
+        let mut buf = String::new();
+        sheet_file.read_to_string(&mut buf)
+            .map_err(|e| format!("sheet read failed: {}", e))?;
+        buf
+    };
+
+    let mut product_code_map = HashMap::new();
+    let mut reader = XmlReader::from_str(&sheet_content);
+    reader.trim_text(true);
+
+    let col_re = Regex::new(r"^([A-Z]+)(\d+)$").unwrap();
+
+    let mut current_cell_ref = String::new();
+    let mut current_cell_type = String::new();
+    let mut current_value = String::new();
+    let mut in_cell = false;
+    let mut in_value = false;
+    let mut row_data: HashMap<String, String> = HashMap::new(); // col_letter -> value
+    let mut current_row_num: u32 = 0;
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(ref e)) if e.name().as_ref() == b"row" => {
+                row_data.clear();
+                current_row_num = 0;
+                for attr in e.attributes().flatten() {
+                    if attr.key.as_ref() == b"r" {
+                        current_row_num = String::from_utf8_lossy(&attr.value).parse().unwrap_or(0);
+                    }
+                }
+            }
+            Ok(Event::Start(ref e)) if e.name().as_ref() == b"c" => {
+                in_cell = true;
+                current_cell_ref.clear();
+                current_cell_type.clear();
+                current_value.clear();
+                for attr in e.attributes().flatten() {
+                    match attr.key.as_ref() {
+                        b"r" => current_cell_ref = String::from_utf8_lossy(&attr.value).to_string(),
+                        b"t" => current_cell_type = String::from_utf8_lossy(&attr.value).to_string(),
+                        _ => {}
+                    }
+                }
+            }
+            Ok(Event::Start(ref e)) if in_cell && e.name().as_ref() == b"v" => {
+                in_value = true;
+                current_value.clear();
+            }
+            Ok(Event::Text(ref e)) if in_value => {
+                if let Ok(text) = e.unescape() {
+                    current_value.push_str(&text);
+                }
+            }
+            Ok(Event::End(ref e)) if e.name().as_ref() == b"v" => {
+                in_value = false;
+            }
+            Ok(Event::End(ref e)) if e.name().as_ref() == b"c" => {
+                if in_cell && !current_cell_ref.is_empty() && !current_value.is_empty() {
+                    if let Some(caps) = col_re.captures(&current_cell_ref) {
+                        let col = caps.get(1).unwrap().as_str().to_string();
+                        // 값 해석: t="s"이면 shared string index, t="str"이면 인라인 문자열
+                        let resolved = if current_cell_type == "s" {
+                            let idx: usize = current_value.parse().unwrap_or(usize::MAX);
+                            shared_strings.get(idx).cloned().unwrap_or_default()
+                        } else {
+                            // t="str", t="inlineStr", 또는 기본(숫자) - 원본 문자열 그대로
+                            current_value.clone()
+                        };
+                        row_data.insert(col, resolved);
+                    }
+                }
+                in_cell = false;
+            }
+            Ok(Event::End(ref e)) if e.name().as_ref() == b"row" => {
+                // Row 8+만 처리 (1-indexed)
+                if current_row_num >= 8 {
+                    let code = row_data.get("C").cloned().unwrap_or_default().trim().to_string();
+                    let name = row_data.get("D").cloned().unwrap_or_default().trim().to_string();
+                    if !code.is_empty() && !name.is_empty() {
+                        product_code_map.entry(name).or_insert(code);
+                    }
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => break,
+            _ => {}
+        }
+    }
+
+    Ok(product_code_map)
+}
+
+// calamine fallback (선행 0 소실 가능)
+fn build_product_code_map_calamine(workbook: &mut Xlsx<Cursor<&[u8]>>, floor_sheet_name: &str) -> HashMap<String, String> {
+    let mut product_code_map = HashMap::new();
+
+    let range = match workbook.worksheet_range(floor_sheet_name) {
+        Ok(r) => r,
+        Err(_) => return product_code_map,
+    };
+
+    for row in range.rows().skip(7) {
+        let product_code = row.get(2).map(cell_to_barcode).unwrap_or_default();
+        let product_name = row.get(3).map(cell_to_string).unwrap_or_default();
+
+        let name = product_name.trim().to_string();
+        let code = product_code.trim().to_string();
+
+        if !name.is_empty() && !code.is_empty() {
+            product_code_map.entry(name).or_insert(code);
         }
     }
 
@@ -483,7 +714,7 @@ fn convert_internal(
     console_log!("WASM: Origin loaded - {} sheets", sheet_names.len());
 
     // 층별 시트에서 단품명 → 단품코드(바코드) 매핑 구축
-    let product_code_map = build_product_code_map(&mut workbook);
+    let product_code_map = build_product_code_map(&mut workbook, origin_data);
     console_log!("WASM: Product code map built - {} entries", product_code_map.len());
 
     let day_names = ["월", "화", "수", "목", "금"];
