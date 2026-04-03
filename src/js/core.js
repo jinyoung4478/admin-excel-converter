@@ -197,11 +197,26 @@ const ExcelCore = {
                     fgColor: { argb: 'FFE0E0E0' }
                 };
                 
+                // 텍스트로 유지해야 하는 컬럼 (선행 0 보존)
+                const textColumns = ['단품코드', '코드'];
+                const textColIndices = new Set(
+                    headers.map((h, i) => textColumns.includes(h) ? i : -1).filter(i => i >= 0)
+                );
+
                 // 데이터 추가
                 sheetInfo.data.forEach((row, rowIndex) => {
                     const values = headers.map(h => row[h]);
                     const excelRow = worksheet.addRow(values);
-                    
+
+                    // 텍스트 컬럼 셀을 명시적 문자열로 설정 (선행 0 보존)
+                    textColIndices.forEach(colIdx => {
+                        const cell = excelRow.getCell(colIdx + 1);
+                        if (cell.value != null) {
+                            cell.value = String(cell.value);
+                            cell.numFmt = '@';
+                        }
+                    });
+
                     // 매핑 실패 행 스타일 적용 (_isMappingFailed 플래그 확인)
                     if (sheetInfo.name === '데이터' && row['_isMappingFailed']) {
                         excelRow.eachCell((cell) => {
@@ -213,9 +228,6 @@ const ExcelCore = {
                         });
                     }
                 });
-                
-                // 열 너비 자동 조정 + 텍스트 컬럼 포맷 설정
-                const textColumns = ['단품코드', '코드'];
                 headers.forEach((header, idx) => {
                     const column = worksheet.getColumn(idx + 1);
                     let maxLength = header.length;
