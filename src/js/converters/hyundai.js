@@ -3,7 +3,7 @@
  * WASM 가속 지원 (fallback: JS)
  */
 
-import { ExcelCore, StatusManager, FileInputManager } from '../core.js?v=5';
+import { ExcelCore, StatusManager, FileInputManager } from '../core.js?v=8';
 
 // 컨버터 설정
 const config = {
@@ -19,8 +19,9 @@ let wasmReady = false;
 // WASM 초기화
 async function initWasm() {
     try {
-        const wasm = await import('../../wasm/excel_converter_wasm.js');
-        await wasm.default();
+        const wasm = await import('../../wasm/excel_converter_wasm.js?v=8');
+        const wasmUrl = new URL('../../wasm/excel_converter_wasm_bg.wasm?v=8', import.meta.url);
+        await wasm.default(wasmUrl);
         wasmModule = wasm;
         wasmReady = true;
         console.log('WASM module loaded successfully');
