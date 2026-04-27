@@ -1,4 +1,95 @@
-let wasm;
+/* @ts-self-types="./excel_converter_wasm.d.ts" */
+
+/**
+ * @param {Uint8Array} origin_data
+ * @param {Uint8Array} mapping_data
+ * @param {string} filename
+ * @returns {any}
+ */
+export function convert_excel(origin_data, mapping_data, filename) {
+    const ptr0 = passArray8ToWasm0(origin_data, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(mapping_data, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(filename, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.convert_excel(ptr0, len0, ptr1, len1, ptr2, len2);
+    return ret;
+}
+
+export function init() {
+    wasm.init();
+}
+function __wbg_get_imports() {
+    const import0 = {
+        __proto__: null,
+        __wbg___wbindgen_throw_6b64449b9b9ed33c: function(arg0, arg1) {
+            throw new Error(getStringFromWasm0(arg0, arg1));
+        },
+        __wbg_error_a6fa202b58aa1cd3: function(arg0, arg1) {
+            let deferred0_0;
+            let deferred0_1;
+            try {
+                deferred0_0 = arg0;
+                deferred0_1 = arg1;
+                console.error(getStringFromWasm0(arg0, arg1));
+            } finally {
+                wasm.__wbindgen_free(deferred0_0, deferred0_1, 1);
+            }
+        },
+        __wbg_log_892aab46965fbe8c: function(arg0, arg1) {
+            console.log(getStringFromWasm0(arg0, arg1));
+        },
+        __wbg_new_227d7c05414eb861: function() {
+            const ret = new Error();
+            return ret;
+        },
+        __wbg_new_682678e2f47e32bc: function() {
+            const ret = new Array();
+            return ret;
+        },
+        __wbg_new_aa8d0fa9762c29bd: function() {
+            const ret = new Object();
+            return ret;
+        },
+        __wbg_set_3bf1de9fab0cd644: function(arg0, arg1, arg2) {
+            arg0[arg1 >>> 0] = arg2;
+        },
+        __wbg_set_6be42768c690e380: function(arg0, arg1, arg2) {
+            arg0[arg1] = arg2;
+        },
+        __wbg_stack_3b0d974bbf31e44f: function(arg0, arg1) {
+            const ret = arg1.stack;
+            const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+        },
+        __wbindgen_cast_0000000000000001: function(arg0) {
+            // Cast intrinsic for `F64 -> Externref`.
+            const ret = arg0;
+            return ret;
+        },
+        __wbindgen_cast_0000000000000002: function(arg0, arg1) {
+            // Cast intrinsic for `Ref(String) -> Externref`.
+            const ret = getStringFromWasm0(arg0, arg1);
+            return ret;
+        },
+        __wbindgen_init_externref_table: function() {
+            const table = wasm.__wbindgen_externrefs;
+            const offset = table.grow(4);
+            table.set(0, undefined);
+            table.set(offset + 0, undefined);
+            table.set(offset + 1, null);
+            table.set(offset + 2, true);
+            table.set(offset + 3, false);
+        },
+    };
+    return {
+        __proto__: null,
+        "./excel_converter_wasm_bg.js": import0,
+    };
+}
 
 let cachedDataViewMemory0 = null;
 function getDataViewMemory0() {
@@ -89,33 +180,20 @@ if (!('encodeInto' in cachedTextEncoder)) {
             read: arg.length,
             written: buf.length
         };
-    }
+    };
 }
 
 let WASM_VECTOR_LEN = 0;
 
-/**
- * @param {Uint8Array} origin_data
- * @param {Uint8Array} mapping_data
- * @param {string} filename
- * @returns {any}
- */
-export function convert_excel(origin_data, mapping_data, filename) {
-    const ptr0 = passArray8ToWasm0(origin_data, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(mapping_data, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passStringToWasm0(filename, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len2 = WASM_VECTOR_LEN;
-    const ret = wasm.convert_excel(ptr0, len0, ptr1, len1, ptr2, len2);
-    return ret;
+let wasmModule, wasm;
+function __wbg_finalize_init(instance, module) {
+    wasm = instance.exports;
+    wasmModule = module;
+    cachedDataViewMemory0 = null;
+    cachedUint8ArrayMemory0 = null;
+    wasm.__wbindgen_start();
+    return wasm;
 }
-
-export function init() {
-    wasm.init();
-}
-
-const EXPECTED_RESPONSE_TYPES = new Set(['basic', 'cors', 'default']);
 
 async function __wbg_load(module, imports) {
     if (typeof Response === 'function' && module instanceof Response) {
@@ -123,14 +201,12 @@ async function __wbg_load(module, imports) {
             try {
                 return await WebAssembly.instantiateStreaming(module, imports);
             } catch (e) {
-                const validResponse = module.ok && EXPECTED_RESPONSE_TYPES.has(module.type);
+                const validResponse = module.ok && expectedResponseType(module.type);
 
                 if (validResponse && module.headers.get('Content-Type') !== 'application/wasm') {
                     console.warn("`WebAssembly.instantiateStreaming` failed because your server does not serve Wasm with `application/wasm` MIME type. Falling back to `WebAssembly.instantiate` which is slower. Original error:\n", e);
 
-                } else {
-                    throw e;
-                }
+                } else { throw e; }
             }
         }
 
@@ -145,92 +221,20 @@ async function __wbg_load(module, imports) {
             return instance;
         }
     }
-}
 
-function __wbg_get_imports() {
-    const imports = {};
-    imports.wbg = {};
-    imports.wbg.__wbg___wbindgen_throw_dd24417ed36fc46e = function(arg0, arg1) {
-        throw new Error(getStringFromWasm0(arg0, arg1));
-    };
-    imports.wbg.__wbg_error_7534b8e9a36f1ab4 = function(arg0, arg1) {
-        let deferred0_0;
-        let deferred0_1;
-        try {
-            deferred0_0 = arg0;
-            deferred0_1 = arg1;
-            console.error(getStringFromWasm0(arg0, arg1));
-        } finally {
-            wasm.__wbindgen_free(deferred0_0, deferred0_1, 1);
+    function expectedResponseType(type) {
+        switch (type) {
+            case 'basic': case 'cors': case 'default': return true;
         }
-    };
-    imports.wbg.__wbg_log_4056d218f4270c7f = function(arg0, arg1) {
-        console.log(getStringFromWasm0(arg0, arg1));
-    };
-    imports.wbg.__wbg_new_1ba21ce319a06297 = function() {
-        const ret = new Object();
-        return ret;
-    };
-    imports.wbg.__wbg_new_25f239778d6112b9 = function() {
-        const ret = new Array();
-        return ret;
-    };
-    imports.wbg.__wbg_new_8a6f238a6ece86ea = function() {
-        const ret = new Error();
-        return ret;
-    };
-    imports.wbg.__wbg_set_3f1d0b984ed272ed = function(arg0, arg1, arg2) {
-        arg0[arg1] = arg2;
-    };
-    imports.wbg.__wbg_set_7df433eea03a5c14 = function(arg0, arg1, arg2) {
-        arg0[arg1 >>> 0] = arg2;
-    };
-    imports.wbg.__wbg_stack_0ed75d68575b0f3c = function(arg0, arg1) {
-        const ret = arg1.stack;
-        const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
-        getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
-    };
-    imports.wbg.__wbindgen_cast_2241b6af4c4b2941 = function(arg0, arg1) {
-        // Cast intrinsic for `Ref(String) -> Externref`.
-        const ret = getStringFromWasm0(arg0, arg1);
-        return ret;
-    };
-    imports.wbg.__wbindgen_cast_d6cd19b81560fd6e = function(arg0) {
-        // Cast intrinsic for `F64 -> Externref`.
-        const ret = arg0;
-        return ret;
-    };
-    imports.wbg.__wbindgen_init_externref_table = function() {
-        const table = wasm.__wbindgen_externrefs;
-        const offset = table.grow(4);
-        table.set(0, undefined);
-        table.set(offset + 0, undefined);
-        table.set(offset + 1, null);
-        table.set(offset + 2, true);
-        table.set(offset + 3, false);
-    };
-
-    return imports;
-}
-
-function __wbg_finalize_init(instance, module) {
-    wasm = instance.exports;
-    __wbg_init.__wbindgen_wasm_module = module;
-    cachedDataViewMemory0 = null;
-    cachedUint8ArrayMemory0 = null;
-
-
-    wasm.__wbindgen_start();
-    return wasm;
+        return false;
+    }
 }
 
 function initSync(module) {
     if (wasm !== undefined) return wasm;
 
 
-    if (typeof module !== 'undefined') {
+    if (module !== undefined) {
         if (Object.getPrototypeOf(module) === Object.prototype) {
             ({module} = module)
         } else {
@@ -250,7 +254,7 @@ async function __wbg_init(module_or_path) {
     if (wasm !== undefined) return wasm;
 
 
-    if (typeof module_or_path !== 'undefined') {
+    if (module_or_path !== undefined) {
         if (Object.getPrototypeOf(module_or_path) === Object.prototype) {
             ({module_or_path} = module_or_path)
         } else {
@@ -258,7 +262,7 @@ async function __wbg_init(module_or_path) {
         }
     }
 
-    if (typeof module_or_path === 'undefined') {
+    if (module_or_path === undefined) {
         module_or_path = new URL('excel_converter_wasm_bg.wasm', import.meta.url);
     }
     const imports = __wbg_get_imports();
@@ -272,5 +276,4 @@ async function __wbg_init(module_or_path) {
     return __wbg_finalize_init(instance, module);
 }
 
-export { initSync };
-export default __wbg_init;
+export { initSync, __wbg_init as default };
