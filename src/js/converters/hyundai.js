@@ -3,7 +3,7 @@
  * WASM 가속 지원 (fallback: JS)
  */
 
-import { ExcelCore, StatusManager, FileInputManager } from '../core.js?v=8';
+import { ExcelCore, StatusManager, FileInputManager } from '../core.js?v=10';
 
 // 컨버터 설정
 const config = {
@@ -19,8 +19,8 @@ let wasmReady = false;
 // WASM 초기화
 async function initWasm() {
     try {
-        const wasm = await import('../../wasm/excel_converter_wasm.js?v=8');
-        const wasmUrl = new URL('../../wasm/excel_converter_wasm_bg.wasm?v=8', import.meta.url);
+        const wasm = await import('../../wasm/excel_converter_wasm.js?v=10');
+        const wasmUrl = new URL('../../wasm/excel_converter_wasm_bg.wasm?v=10', import.meta.url);
         await wasm.default(wasmUrl);
         wasmModule = wasm;
         wasmReady = true;
@@ -364,6 +364,244 @@ function convertDataJS(originWorkbook, mapping) {
     };
 }
 
+// ========== 단일 매장 가로 일자 블록 포맷 (양재 3F 기자실 등) ==========
+// 이 포맷은 별도의 월/화/수/목/금 시트가 없고, ☆메뉴표 시트 하나에
+// 가로 방향으로 요일 블록이 배치됨. 한 매장만 다루며 운영 요일도 일부만 있을 수 있음.
+
+function detectHorizontalFormat(workbook) {
+    const hasMenuSheet = workbook.SheetNames.includes('☆메뉴표');
+    const hasDaySheets = ['월', '화', '수', '목', '금'].some(d => workbook.SheetNames.includes(d));
+    return hasMenuSheet && !hasDaySheets;
+}
+
+// ☆메뉴표 B3에서 주의 시작일(월요일) 추출
+// 예: "■ 현대그린푸드 현대차 간식서비스 양재 3F (기자실) 메뉴 (26.5.18~5.22)"
+function extractWeekStartFromMenuSheet(sheet) {
+    const b3 = ExcelCore.getCellValue(sheet, 3, 2);
+    if (!b3 || typeof b3 !== 'string') {
+        throw new Error('☆메뉴표 시트 B3 셀에 날짜 정보가 없습니다.');
+    }
+    const match = b3.match(/\((\d+)\.(\d+)\.(\d+)\s*~/);
+    if (!match) {
+        throw new Error(`☆메뉴표 B3에서 날짜를 인식할 수 없습니다: "${b3}"`);
+    }
+    let year = parseInt(match[1]);
+    if (year < 100) year += 2000;
+    const month = parseInt(match[2]);
+    const day = parseInt(match[3]);
+    return new Date(year, month - 1, day);
+}
+
+// 매장 단품 시트(A6 또는 D2/D6에 "※ <매장> :" 패턴이 있는 시트)에서 매장명 추출
+function findStoreNameFromFloorSheet(workbook) {
+    const skipSheets = new Set(['월', '화', '수', '목', '금']);
+
+    for (const sheetName of workbook.SheetNames) {
+        if (skipSheets.has(sheetName)) continue;
+        if (/^[☆※★]/.test(sheetName)) continue;
+
+        const sheet = workbook.Sheets[sheetName];
+        const headerC = ExcelCore.getCellValue(sheet, 7, 3);
+        if (!headerC || !String(headerC).includes('단품코드')) continue;
+
+        for (let row = 1; row <= 10; row++) {
+            for (const col of [1, 4]) { // A 또는 D
+                const v = ExcelCore.getCellValue(sheet, row, col);
+                if (v && typeof v === 'string') {
+                    const storeName = extractStoreName(v);
+                    if (storeName) return storeName;
+                }
+            }
+        }
+    }
+    return null;
+}
+
+// ☆메뉴표 시트 안의 가로 요일 블록을 모두 찾음.
+// 블록은 "월요일"/"화요일"/.../"금요일" 라벨이 있는 셀로 시작.
+// 라벨 기준 상대 위치: NO(+0), 오후진열(+1), 종류(+2), 상품명(+3), BOX(+4)
+// 헤더: row+1, row+2 / 계: row+3 / 데이터 시작: row+4
+//
+// 주의: ExcelJS는 가로 병합 셀의 값을 병합 범위 내 모든 셀에 복제해 둘 수 있음.
+// (예: B6:I6 병합셀의 "월요일" 라벨이 B6~I6 8개 셀 모두에 노출될 수 있음)
+// 따라서 같은 행의 좌측 셀이 동일 값이면 병합 내부로 간주하고 스킵해야 한다.
+function findHorizontalDayBlocks(sheet) {
+    const blocks = [];
+    const range = ExcelCore.decodeRange(sheet['!ref'] || 'A1');
+    const dayRe = /^(월|화|수|목|금)요일$/;
+
+    for (let row = 1; row <= range.e.r + 1; row++) {
+        for (let col = 1; col <= range.e.c + 1; col++) {
+            const val = ExcelCore.getCellValue(sheet, row, col);
+            if (!val || typeof val !== 'string') continue;
+            const m = val.trim().match(dayRe);
+            if (!m) continue;
+
+            // 좌측 셀이 동일 값이면 병합 범위 내부 → 블록 시작점이 아니므로 스킵.
+            if (col > 1) {
+                const leftVal = ExcelCore.getCellValue(sheet, row, col - 1);
+                if (leftVal === val) continue;
+            }
+
+            blocks.push({
+                dayName: m[1],
+                row,
+                colNo: col,
+                colAfternoon: col + 1,
+                colProduct: col + 3,
+                colBox: col + 4,
+            });
+        }
+    }
+    return blocks;
+}
+
+// 가로 일자 블록에서 상품 추출
+function extractProductsFromHorizontalBlock(sheet, block, maxProducts = 30) {
+    const products = [];
+    const startRow = block.row + 4;
+    const range = ExcelCore.decodeRange(sheet['!ref'] || 'A1');
+    const endRow = range.e.r + 1;
+
+    for (let row = startRow; row < startRow + maxProducts && row <= endRow; row++) {
+        const productName = ExcelCore.getCellValue(sheet, row, block.colProduct);
+        if (productName == null) continue;
+        // 상품명은 반드시 문자열이어야 함. 객체(수식 셀이 ExcelJS에서 객체로 노출되는 경우)
+        // 나 숫자(메뉴표 사이 footer 행)는 모두 스킵하여 잘못된 "[object Object]" / 숫자 row 방지.
+        if (typeof productName !== 'string') continue;
+        const pnStr = productName.trim();
+        if (pnStr === '') continue;
+
+        let boxQty = ExcelCore.getCellValue(sheet, row, block.colBox);
+        boxQty = parseInt(boxQty) || 0;
+        if (boxQty === 0) continue;
+
+        const afternoonVal = ExcelCore.getCellValue(sheet, row, block.colAfternoon);
+        const afternoon = afternoonVal ? String(afternoonVal).trim() : '';
+
+        products.push({
+            productName: pnStr,
+            boxQty,
+            afternoon,
+        });
+    }
+
+    return products;
+}
+
+function convertHorizontalFormatJS(originWorkbook, mapping) {
+    const menuSheet = originWorkbook.Sheets['☆메뉴표'];
+    if (!menuSheet) {
+        throw new Error('☆메뉴표 시트를 찾을 수 없습니다.');
+    }
+
+    const weekStart = extractWeekStartFromMenuSheet(menuSheet);
+    const productCodeMap = buildProductCodeMap(originWorkbook);
+    const storeName = findStoreNameFromFloorSheet(originWorkbook) || '알수없는 매장';
+
+    let code, systemName, isMappingFailed;
+    if (!mapping[storeName]) {
+        code = 'MAPPING_FAILED';
+        systemName = '[매핑실패] ' + storeName;
+        isMappingFailed = true;
+    } else if (!mapping[storeName].code || !mapping[storeName].systemName) {
+        code = 'MAPPING_FAILED';
+        systemName = '[매핑실패-빈값] ' + storeName;
+        isMappingFailed = true;
+    } else {
+        code = mapping[storeName].code;
+        systemName = mapping[storeName].systemName;
+        isMappingFailed = false;
+    }
+
+    const dayOffsets = { '월': 0, '화': 1, '수': 2, '목': 3, '금': 4 };
+    const blocks = findHorizontalDayBlocks(menuSheet);
+
+    const allData = [];
+    const mappingFailures = [];
+    const validation = [];
+
+    for (const block of blocks) {
+        const offset = dayOffsets[block.dayName];
+        const date = new Date(weekStart);
+        date.setDate(date.getDate() + offset);
+        const dateStr = ExcelCore.formatDate(date);
+
+        const products = extractProductsFromHorizontalBlock(menuSheet, block);
+
+        if (isMappingFailed && products.length > 0) {
+            mappingFailures.push({ day: block.dayName, storeName });
+        }
+
+        for (const product of products) {
+            allData.push({
+                '일자': dateStr,
+                '코드': code,
+                '원본 사업장명': storeName,
+                '사업장명': systemName,
+                '단품코드': productCodeMap[product.productName] || '단품코드 매핑실패',
+                '품목명': product.productName,
+                'Box 입수': product.boxQty,
+                '오후 진열': product.afternoon,
+                '_isMappingFailed': isMappingFailed,
+            });
+        }
+
+        // 검증: 계 행(block.row + 3)의 BOX 컬럼 값과 추출 합계 비교
+        const originalBox = parseInt(ExcelCore.getCellValue(menuSheet, block.row + 3, block.colBox)) || 0;
+        const extractedBox = products.reduce((sum, p) => sum + p.boxQty, 0);
+
+        let matchResult;
+        if (originalBox > 0) {
+            matchResult = extractedBox === originalBox ? '일치' : `불일치 (차이: ${extractedBox - originalBox})`;
+        } else if (extractedBox === 0) {
+            matchResult = '데이터 없음';
+        } else {
+            matchResult = '원본 데이터 없음';
+        }
+
+        const dayFailureSet = new Set(
+            mappingFailures.filter(f => f.day === block.dayName).map(f => f.storeName)
+        );
+        const mappingFailureRows = allData.filter(r => r['일자'] === dateStr && r._isMappingFailed).length;
+        const productCodeFailureRows = allData
+            .filter(r => r['일자'] === dateStr && r['단품코드'] === '단품코드 매핑실패').length;
+
+        validation.push({
+            '일자': dateStr,
+            '요일': block.dayName,
+            '추출 Box 합계': extractedBox,
+            '원본 Box 합계': originalBox,
+            '검증 결과': matchResult,
+            '매핑실패 매장수': dayFailureSet.size,
+            '매핑실패 데이터수': mappingFailureRows,
+            '단품코드 매핑실패': productCodeFailureRows,
+        });
+    }
+
+    // 매장별 상세
+    const storeDaily = {};
+    allData.forEach(row => {
+        const key = `${row['일자']}_${row['코드']}_${row['사업장명']}`;
+        if (!storeDaily[key]) {
+            storeDaily[key] = {
+                '일자': row['일자'],
+                '코드': row['코드'],
+                '사업장명': row['사업장명'],
+                'Box 합계': 0,
+            };
+        }
+        storeDaily[key]['Box 합계'] += row['Box 입수'];
+    });
+
+    return {
+        data: allData,
+        validation,
+        storeDaily: Object.values(storeDaily),
+        mappingFailures: [...new Set(mappingFailures.map(f => f.storeName))].map(s => ({ '매장명': s })),
+    };
+}
+
 // 결과 엑셀 생성 (JS)
 function createResultWorkbookJS(result) {
     const workbook = ExcelCore.createWorkbook();
@@ -413,6 +651,21 @@ async function convert() {
 
         const result = await convertWithWasm(originData, mappingData, originFile.name);
 
+        // 표준 포맷이 아닌 경우(예: ☆메뉴표 단일 시트) WASM은 0행을 반환함.
+        // 이 경우에만 가로 블록 JS 핸들러로 fallback (표준 포맷은 절대 영향 없음).
+        if (result.data.length === 0) {
+            const originWorkbook = await ExcelCore.readFile(originFile);
+            if (detectHorizontalFormat(originWorkbook)) {
+                const mapping = parseMappingTable(await ExcelCore.readFile(mappingFile));
+                const horizontalResult = convertHorizontalFormatJS(originWorkbook, mapping);
+                const workbook = createResultWorkbookJS(horizontalResult);
+                const outputFileName = originFile.name.replace(/\.xlsx?$/i, '_result.xlsx');
+                await ExcelCore.downloadExcel(workbook, outputFileName);
+                const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+                return { count: horizontalResult.data.length, elapsed, mode: 'JS (가로블록)' };
+            }
+        }
+
         // WASM 결과를 JS 형식으로 변환하여 Excel 생성
         const jsResult = {
             data: result.data.map(r => ({
@@ -459,14 +712,19 @@ async function convert() {
         ]);
 
         const mapping = parseMappingTable(mappingWorkbook);
-        const result = convertDataJS(originWorkbook, mapping);
+
+        // 표준 포맷이 아닌 가로 블록 포맷이면 신규 핸들러 사용 (표준은 그대로 convertDataJS).
+        const useHorizontal = detectHorizontalFormat(originWorkbook);
+        const result = useHorizontal
+            ? convertHorizontalFormatJS(originWorkbook, mapping)
+            : convertDataJS(originWorkbook, mapping);
         const workbook = createResultWorkbookJS(result);
 
         const outputFileName = originFile.name.replace(/\.xlsx?$/i, '_result.xlsx');
         await ExcelCore.downloadExcel(workbook, outputFileName);
 
         const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
-        return { count: result.data.length, elapsed, mode: 'JS' };
+        return { count: result.data.length, elapsed, mode: useHorizontal ? 'JS (가로블록)' : 'JS' };
     }
 }
 
